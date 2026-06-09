@@ -16,15 +16,13 @@ Vars:
 	v_dc=5400 [out=true]
 	err_v=0 [out=true]
 	i_f_ref_d=1081.336 [out=true]
+	
 Distribs:
 	g1 [type=Gauss mean=0 dev=0.3 width=1]
+	
 Params:
-	//Inputs
-	v_dc_ref=5400
-	i_f_ref_q=0
-	β_ref=0
 	//Parameters
-	p_s_ref=-1999927 [out=true]
+	p_s_ref=-1999927
 	C_p=0.356 
 	ρ=1.293
 	λ=6.399 
@@ -50,7 +48,6 @@ Params:
 	ω_g_rated=1.9195
 	m_rated=1041900
 	m_t=m_rated 
-	m_m_ref=m_rated 
 	
 	//PI pitch
 	Kp_opt=282800
@@ -59,8 +56,14 @@ Params:
 	K_vp=-0.576
 	K_vi	=-18.33
 	
-	x [out=true]
+	//ref
+	v_dc_ref=5400
+	i_f_ref_q=0
 	
+	//Inputs
+	m_m_ref=m_rated 
+	β_ref=0
+
 PreProc:
 	if t<40:
 		v_w=12
@@ -87,15 +90,16 @@ PreProc:
 	end
 	m_t=0.5*ρ*π*r_t^2*v_w^3*C_p*n_g/ω_g
 	p_s_ref=m_m_ref*ω_g
-	x=(-p_s_ref-2*R_s/(3*n_p^2*ψ_pm^2)*m_m_ref^2-u_g*i_f_ref_d/K-2*Rf/(3*K^2)*(i_f_ref_d^2+i_f_ref_q^2))/(C_dc*v_dc)
+	
 TFs:
 	i_f_ref_d/err_v=(K_vp*s+K_vi)/s
+	
 NLEs:
 	err_v=v_dc_ref-v_dc
+	
 ODEs:
 	ω_g'=(m_t+m_m_ref)/θ
 	β'=(β_ref-β)/τ_β
 	v_dc'=(-m_m_ref*ω_g-2*R_s/(3*n_p^2*ψ_pm^2)*m_m_ref^2-u_g*i_f_ref_d/K-2*Rf/(3*K^2)*(i_f_ref_d^2+i_f_ref_q^2))/(C_dc*v_dc)
-PostProc:
 	
 end	

@@ -15,4 +15,4 @@ Plots [backColor=auto]: //backColor: auto - system back color, light - white bac
 	@y << v_w [colorL=Black colorD=white width=2 name="v_w"]
 	@cond -> repeat# == 0
 end
-end //end of visual model//Show some plots
+end //end of visual model

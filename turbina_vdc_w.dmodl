@@ -11,14 +11,14 @@ end
 Model [type=DAE name="Turbine_3state_model" domain=real method=RK2 eps=1e-6]:
 	
 Vars:
-	ω_g=1.9195 [out=true]//λ* * v_w / r_t
-	β=2.7 [out=true]
+	ω_g=1.5 [out=true]//λ* * v_w / r_t
+	β=0 [out=true]
 	v_dc=5400 [out=true]
 	err_v=0 [out=true]
 	i_f_ref_d=1081.336 [out=true]
 	
 Distribs:
-	g1 [type=Gauss mean=0 dev=0.3 width=1]
+	g1 [type=Gauss mean=0 dev=4 width=4]
 	
 Params:
 	//Parameters
@@ -28,7 +28,7 @@ Params:
 	λ=6.399 
 	τ_β=0.5
 	r_t=40
-	v_w=12
+	v_w=12 [out=true]
 	n_g=1
 	θ_t=8600000
 	θ_m=1300000
@@ -61,7 +61,7 @@ Params:
 	i_f_ref_q=0
 	
 	//Inputs
-	m_m_ref=m_rated 
+	m_m_ref=m_rated [out=true]
 	β_ref=0
 
 PreProc:
@@ -80,7 +80,7 @@ PreProc:
 	if t>160:
 		v_w=11
 	end
-	v_w=v_w//+rnd(g1)
+	v_w=v_w+rnd(g1)
 	λ=r_t*ω_t/v_w
 	C_p=max(0.73*(151*(1/(λ-0.02*β)-0.003/(β^3+1))-0.58*β-0.02*β^2.14-13.2)*exp(-18.4*(1/(λ-0.02*β)-0.003/(β^3+1))),0)
 	if ω_g<ω_g_rated:

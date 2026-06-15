@@ -1,0 +1,56 @@
+Header:
+	maxIter = 6000 	//Maximum number of iterations for NL, WLS, and DAE problems
+	report = Solved 	//Only successfully solved cases. Other options: All - shows solved and nonSolved with iterations, AllWithDetails - All + debug information.
+	maxReps = -1 	//Used to limit repetitions (-1: no limit)
+	outToTxt = false 	//true: create output txt file for results, fale: output file was not created
+	txtFile = "" 	//only valid if outToTxt was set to true
+	startTime = 0	//Solution start time for time domain (ODE and DAE) problems
+	dTime = 0.1	//Integration time step for time domain (ODE and DAE) problems
+	endTime = 40	//Solution end time step for time domain (ODE and DAE) problems
+end
+Model [type=DAE name="Turbine_3state_model" domain=real method=RK2 eps=1e-6]:
+	
+Vars [out=true]:
+	x1= 0
+	x2= 0
+
+Params:
+	A00=-0.03629343
+	A01=-0.00592805
+	A10=0
+	A11=-2
+	
+	B00=1.01010101e-07
+	B01=0
+	B10=0
+	B11=2
+	
+	E00=0.02219163
+	E01=0
+	
+	//ulazi
+	u1=0
+	u2=5
+	dist=0
+	
+	//izlazi
+	x10=0
+	x20=0
+	y1 [out=true]
+	y2 [out=true]
+	
+PreProc:
+	y1=x1+x10
+	y2=x2+x20
+	u1=-282800*x1
+	if x1<1.915:
+		u1=-282800*x1
+	else
+		u1=-1041900
+	end
+	
+ODEs:
+	x1'=A00*x1+A01*x2+B00*u1+B01*(u2-x20)+E00*dist
+	x2'=A10*x1+A11*x2+B10*u1+B11*(u2-x20)+E01*dist
+
+end	

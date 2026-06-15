@@ -19,6 +19,7 @@ Vars:
 	
 Distribs:
 	g1 [type=Gauss mean=0 dev=10 width=10]
+	g2 [type=Gauss mean=15 dev=15 width=15]
 	
 Params:
 	//Parameters
@@ -63,12 +64,15 @@ Params:
 	//Inputs
 	m_m_ref=m_rated 
 	β_ref=0
+	
 	a=0
 
 PreProc:
 	if a==1000:
 		v_w=+rnd(g1)+10
+		β_ref=rnd(g2)
 		a=0
+		
 	end
 	a=a+1	
 	λ=r_t*ω_t/v_w

@@ -11,7 +11,7 @@ Plots [backColor=auto]: //backColor: auto - system back color, light - white bac
 	@x << t
 	@y << ω_g [colorL=darkBlue colorD=cyan width=2 name="ω_g"]
 	@y << β [colorL=Green colorD=green width=2 name="β"]
-	@y << v_dc [colorL=red colorD=red width=2 name="v_dc"]
+	//@y << v_dc [colorL=red colorD=red width=2 name="v_dc"]
 	@y << v_w [colorL=Black colorD=white width=2 name="v_w"]
 	@cond -> repeat# == 0
 end

@@ -21,7 +21,7 @@ Vars:
 	i_f_ref_d=1081.336 [out=true]
 	
 Distribs:
-	g1 [type=Gauss mean=0 dev=0.3 width=1]
+	g1 [type=Gauss mean=0 dev=5 width=5]
 	
 Params:
 	//Parameters
@@ -82,7 +82,7 @@ PreProc:
 	if t>160:
 		v_w=11
 	end
-	v_w=v_w//+rnd(g1)
+	v_w=v_w+rnd(g1)
 	λ=r_t*ω_t/v_w
 	C_p=max(0.73*(151*(1/(λ-0.02*β)-0.003/(β^3+1))-0.58*β-0.02*β^2.14-13.2)*exp(-18.4*(1/(λ-0.02*β)-0.003/(β^3+1))),0)
 	if ω_g<ω_g_rated:
@@ -101,6 +101,7 @@ NLEs:
 	err_v=v_dc_ref-v_dc
 	if ω_g<ω_g_rated:
 		err_ω=0
+		β_r=0
 	else
 		err_ω=ω_g_rated-ω_g
 	end

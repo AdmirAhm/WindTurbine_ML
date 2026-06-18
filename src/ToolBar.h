@@ -18,8 +18,7 @@ public:
     : gui::ToolBar("myToolBar", 2)
     , _imgExport(":export")
     {
-        addItem(tr("speedAndType"), tr("speedAndTypeTT"), &_sliderView);
-        addItem(tr("export"), &_imgExport, tr("exportTT"), 20, 0, 0, 10);
+        addItem(tr(""), tr("speedAndTypeTT"), &_sliderView);
     }
     
     gui::CheckBox* getRotateSwitch()
@@ -27,15 +26,7 @@ public:
         return &_sliderView._rotateObject;
     }
 
-    gui::Slider* getSpeedSlider()
-    {
-        return &_sliderView._sliderSpeed;
-    }
-    
-    gui::CheckBox* getTextureSwitch()
-    {
-        return &_sliderView._altTexture;
-    }
+   
     
     void forwardMessagesTo(gui::IMessageConsumer* pConsumer)
     {

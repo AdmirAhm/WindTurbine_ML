@@ -53,19 +53,16 @@ class TBSliderView : public gui::View
 protected:
     gui::HorizontalLayout _hl;
 public:
-    TBSlider _sliderSpeed;
     TBCheckBox _rotateObject;
-    TBCheckBox _altTexture;
 protected:
 public:
     TBSliderView()
-    : _hl(3)
-    , _rotateObject ("Rotate")
-    , _altTexture("Alt. texture")
+    : _hl(1)
+    , _rotateObject ("Run")
     {
         setMargins(0, 0, 0, 0);
         _hl.setMargins(0,0);
-        _hl  << _rotateObject << _sliderSpeed << _altTexture;
+        _hl << _rotateObject;
         setLayout(&_hl);
     }
    

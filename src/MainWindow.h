@@ -45,12 +45,6 @@ protected:
     
     bool onChangedValue(gui::Slider* pSlider) override
     {
-        if (pSlider == _toolBar.getSpeedSlider())
-        {
-            double val = pSlider->getValue();
-            //_viewCubeMap.updateSpeed((float)val);
-            return true;
-        }
         return false;
     }
     

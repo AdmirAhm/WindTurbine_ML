@@ -12,6 +12,7 @@
 #include <gui/gl/Buffer.h>
 #include <gui/gl/Textures.h>
 #include <sc/IModel.h>
+#include "objloader.h"
 
 class ViewGLLighting : public gui::gl::View
 {
@@ -20,13 +21,17 @@ class ViewGLLighting : public gui::gl::View
     glm::mat4 _perspectiveMatrix;
     glm::mat4 _viewMatrix;
     glm::mat4 _mvpMatrix;
+    glm::mat4 _mvpMatrix2;
 
     glm::mat4 _modelViewMat;
+    glm::mat4 _modelViewMat2;
     glm::mat4 _normalMat;
+    glm::mat4 _normalMat2;
     float aspectRatio = 16.0f / 9.0f;
 
     glm::vec3 _lightPos;
     gui::gl::Buffer _gpuBuffer;
+    gui::gl::Buffer _gpuBuffer2;
 
     double dT;
     double t = 0;
@@ -74,11 +79,16 @@ private:
 
         //specify buffer layouts before creatin the context
         _gpuBuffer.init(64, 100, 100, { gui::gl::DataType::vec3, gui::gl::DataType::vec3 });
+        _gpuBuffer2.init(64, 100, 100, { gui::gl::DataType::vec3, gui::gl::DataType::vec3 });
 
         //encode command to set transformation matrix (uniform)
         auto pMtxSetterCmd = _gpuBuffer.createCommand();
         pMtxSetterCmd->createMVPSetter(&_mvpMatrix);
         _gpuBuffer.encode(pMtxSetterCmd);
+
+        auto pMtxSetterCmd2 = _gpuBuffer2.createCommand();
+        pMtxSetterCmd2->createMVPSetter(&_mvpMatrix2);
+        _gpuBuffer2.encode(pMtxSetterCmd2);
         
          //Define the cube's vertices and texture coordinates
 
@@ -90,6 +100,7 @@ private:
 #define NORMAL_zMINUS 0.0f, 0.0f, -1.0f
 
         float a=1.f;
+ /*
         float vertices[] = {
             // Front face (number 1)
             a,   a,  a,   NORMAL_zPLUS,    // Vertex 0 (top-right)
@@ -147,18 +158,84 @@ private:
 
             20, 21, 22, // Bottom face
             20, 22, 23  // Bottom face
-        };
-
-        td::UINT4 nVertices = 4*6;
-        
-        _gpuBuffer.appendVertices(vertices, nVertices);
-        
-        td::UINT4 nIndices = 3*2*6;
-        _gpuBuffer.appendIndices(indices, nIndices);
-        
-        //encode command to draw textured cube
+        };*/
         auto pCubeTextureCmd = _gpuBuffer.createCommand();
-        pCubeTextureCmd->createDrawElements(gui::gl::Primitive::Triangles, 0, nIndices);
+        
+        {
+            std::vector<glm::vec3> vertices;
+            std::vector<glm::vec2> uvs;
+            std::vector<glm::vec3> normals;
+
+            td::String put = gui::getResFileName(":rotor");
+            loadOBJ(put.c_str(), false, vertices, uvs, normals);
+
+            std::vector<unsigned int> indices;
+            std::vector<glm::vec3> indexed_vertices;
+            std::vector<glm::vec2> indexed_uvs;
+            std::vector<glm::vec3> indexed_normals;
+            indexVBO(vertices, uvs, normals, indices, indexed_vertices, indexed_uvs, indexed_normals);
+            auto _indicesCntRemains = (td::UINT4)indices.size();
+
+
+            float* verts = new float[6 * indexed_vertices.size()];
+            for (int i = 0; i < indexed_vertices.size(); i++) {
+                verts[6 * i] = indexed_vertices[i][0];
+                verts[6 * i + 1] = indexed_vertices[i][1];
+                verts[6 * i + 2] = indexed_vertices[i][2];
+                verts[6 * i + 3] = indexed_normals[i][0];
+                verts[6 * i + 4] = indexed_normals[i][1];
+                verts[6 * i + 5] = indexed_normals[i][2];
+            }
+
+            td::UINT4* inds = new td::UINT4[indices.size()];
+            for (int i = 0; i < indices.size(); i++) {
+                inds[i] = indices[i];
+            }
+
+
+            _gpuBuffer.appendVertices(verts, indexed_vertices.size());
+            _gpuBuffer.appendIndices(inds, indices.size());
+            pCubeTextureCmd->createDrawElements(gui::gl::Primitive::Triangles, 0, indices.size());
+        }
+        auto pCubeTextureCmd2 = _gpuBuffer2.createCommand();
+        {
+            std::vector<glm::vec3> vertices;
+            std::vector<glm::vec2> uvs;
+            std::vector<glm::vec3> normals;
+
+            td::String put = gui::getResFileName(":stator");
+            loadOBJ(put.c_str(), false, vertices, uvs, normals);
+
+            std::vector<unsigned int> indices;
+            std::vector<glm::vec3> indexed_vertices;
+            std::vector<glm::vec2> indexed_uvs;
+            std::vector<glm::vec3> indexed_normals;
+            indexVBO(vertices, uvs, normals, indices, indexed_vertices, indexed_uvs, indexed_normals);
+            auto _indicesCntRemains = (td::UINT4)indices.size();
+
+
+            float* verts = new float[6 * indexed_vertices.size()];
+            for (int i = 0; i < indexed_vertices.size(); i++) {
+                verts[6 * i] = indexed_vertices[i][0];
+                verts[6 * i + 1] = indexed_vertices[i][1];
+                verts[6 * i + 2] = indexed_vertices[i][2];
+                verts[6 * i + 3] = indexed_normals[i][0];
+                verts[6 * i + 4] = indexed_normals[i][1];
+                verts[6 * i + 5] = indexed_normals[i][2];
+            }
+
+            td::UINT4* inds = new td::UINT4[indices.size()];
+            for (int i = 0; i < indices.size(); i++) {
+                inds[i] = indices[i];
+            }
+
+
+            _gpuBuffer2.appendVertices(verts, indexed_vertices.size());
+            _gpuBuffer2.appendIndices(inds, indices.size());
+            pCubeTextureCmd2->createDrawElements(gui::gl::Primitive::Triangles, 0, indices.size());
+        }
+        //encode command to draw textured cube
+        
 #ifdef USE_TEXTURE_NORMALS
         pCubeTextureCmd->setTexture(gui::gl::Textures::Unit::T1, 1);
 #endif
@@ -171,7 +248,18 @@ private:
         }
 
         // Load textures
-        _program.setBuffer(&_gpuBuffer);
+        
+
+        _gpuBuffer2.encode(pCubeTextureCmd2);
+
+        if (!_gpuBuffer2.commit())
+        {
+            mu::dbgLog("ERROR! Cannot commit buffer to GPU");
+            return;
+        }
+
+        // Load textures
+        
         
         //dbgCheckGLError();
     }
@@ -183,6 +271,7 @@ protected:
         float farClip = 100.0f; // Far clipping plane
         _perspectiveMatrix = glm::perspective(glm::radians(fov), aspectRatio, nearClip, farClip);
         _mvpMatrix = _perspectiveMatrix * _viewMatrix; //* I for model
+        _mvpMatrix2 = _mvpMatrix;
     }
 
     void onInit() override
@@ -208,7 +297,7 @@ protected:
         _perspectiveMatrix = glm::perspective(glm::radians(fov), aspectRatio, nearClip, farClip);
         
         // Camera parameters
-        glm::vec3 cameraPosition = glm::vec3(2.0, 0.0, 0.0f);  // New camera position
+        glm::vec3 cameraPosition = glm::vec3(3.5, 0.0, 0.0f);  // New camera position
         glm::vec3 cameraTarget = glm::vec3(0.0f, 0.0f, 0.0f);    // Camera target (where the camera is looking)
         glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);         // Up vector
 
@@ -216,8 +305,8 @@ protected:
         _viewMatrix = glm::lookAt(cameraPosition, cameraTarget, cameraUp);
         
         _mvpMatrix = _perspectiveMatrix * _viewMatrix; //* I for model
-
-        _lightPos = glm::vec3(-2., 0., 2.);
+        _mvpMatrix2 = _mvpMatrix;
+        _lightPos = glm::vec3(1.5, 0., 6.);
         
         gui::gl::Context::enable(gui::gl::Context::Flag::DepthTest);
         gui::gl::Context::enable(gui::gl::Context::Flag::CullFace);
@@ -232,12 +321,14 @@ protected:
 
         // Create a model matrix with rotations around X and Y axes
         glm::mat4 modelMatrix = glm::mat4(1.0f);
+        _modelViewMat2 = _viewMatrix * modelMatrix;
         modelMatrix = glm::rotate(modelMatrix, _angleX, glm::vec3(1.0f, 0.0f, 0.0f)); // Rotate around X axis
         modelMatrix = glm::rotate(modelMatrix, _angleY, glm::vec3(0.0f, 1.0f, 0.0f)); // Rotate around Y axis
 
         // Combine the perspective, view, and model matrices to get the final MVP matrix
         _modelViewMat = _viewMatrix * modelMatrix;
         _normalMat = glm::transpose(glm::inverse(_modelViewMat));
+        _normalMat2 = glm::transpose(glm::inverse(_modelViewMat2));
         _mvpMatrix = _perspectiveMatrix * _viewMatrix * modelMatrix;
         return true;
     }
@@ -245,12 +336,22 @@ protected:
     void onDraw(const gui::Rect& rect) override
     {
         // Clear
-        gui::gl::Context::clear(td::ColorID::Black);
+        gui::gl::Context::clear(td::ColorID::MidnightBlue);
         gui::gl::Context::clear({gui::gl::Context::Clear::Color, gui::gl::Context::Clear::Depth});
 
+        _program.setBuffer(&_gpuBuffer);
         _program.activate();    
         _program.setMV(_modelViewMat);
         _program.setN(_normalMat);
+        _program.setLightPos(_lightPos);
+        _program.setV(_viewMatrix);
+        _program.execute();
+        _program.deActivate();
+
+        _program.setBuffer(&_gpuBuffer2);
+        _program.activate();
+        _program.setMV(_modelViewMat2);
+        _program.setN(_normalMat2);
         _program.setLightPos(_lightPos);
         _program.setV(_viewMatrix);
         _program.execute();
@@ -443,7 +544,7 @@ public:
 
     }
 
-    void runStep() {
+    void runStep(double &t_out, double &w, double &beta) {
         t += dT;
         if (paramIndex >= 0)
         {
@@ -461,6 +562,11 @@ public:
         pModel->getOutputSymbolValues(outIndices, outValues);
         updateSpeed(outValues[0]/100);
         showResRow(fOut, t, outValues);
+
+        t_out = t;
+        w = outValues[0];
+        beta = outValues[1];
+        
     }
 
 };

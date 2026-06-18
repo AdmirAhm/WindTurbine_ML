@@ -18,4 +18,8 @@
 		<Res id="woodFloorSPEC" path="Common/Images/wood_floor_spec.jpg" mirrorV = "true"/>
 
 	</Textures>
+	<FileNames>
+		<Res id="rotor" path=":modeli/rotor.obj"/>
+		<Res id="stator" path=":modeli/stator.obj"/>
+	</FileNames>
 </DevRes>

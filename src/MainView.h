@@ -70,7 +70,9 @@ public:
 
     bool onTimer(gui::Timer* pTimer) override
     {
-        _view.runStep();
+        double t, w, beta;
+        _view.runStep(t, w, beta);
+        _view2.setValues(t, w, beta);
         return true;
     }
     

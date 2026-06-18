@@ -11,6 +11,7 @@
 #include <gui/gl/CommandList.h>
 #include <gui/gl/Buffer.h>
 #include <gui/gl/Textures.h>
+#include <sc/IModel.h>
 
 class ViewGLLighting : public gui::gl::View
 {
@@ -22,10 +23,24 @@ class ViewGLLighting : public gui::gl::View
 
     glm::mat4 _modelViewMat;
     glm::mat4 _normalMat;
-    
+    float aspectRatio = 16.0f / 9.0f;
 
     glm::vec3 _lightPos;
     gui::gl::Buffer _gpuBuffer;
+
+    double dT;
+    double t = 0;
+    double epsT = 1e-6;
+    ssize_t paramIndex = -1;
+    sc::IRealStaticModel::NameVector paramNames;
+    sc::IRealStaticModel::IndexVector paramIndices;
+    sc::IRealStaticModel::ValueVector paramValues;
+    sc::IRealDynamicModel* pModel;
+    sc::IDynamic* pDynSolver;
+    cnt::SafeFullVector<uint32_t> outIndices;
+    cnt::SafeFullVector<td::String> outNames;
+    sc::IRealStaticModel::ValueVector outValues;
+    std::ofstream fOut;
 
     //gui::gl::Command::AdditionalUniform _uniformMV, _uniformN;
     
@@ -161,7 +176,15 @@ private:
         //dbgCheckGLError();
     }
 protected:
-    
+    void onResize(const gui::Size& newSize) override {
+        aspectRatio = newSize.width / newSize.height;
+        float fov = 90.0f; // Field of view in degrees
+        float nearClip = 0.1f; // Near clipping plane
+        float farClip = 100.0f; // Far clipping plane
+        _perspectiveMatrix = glm::perspective(glm::radians(fov), aspectRatio, nearClip, farClip);
+        _mvpMatrix = _perspectiveMatrix * _viewMatrix; //* I for model
+    }
+
     void onInit() override
     {
         auto [major, minor] = getOpenGLVersion();
@@ -178,7 +201,6 @@ protected:
         
         // Set up the perspective parameters
         float fov = 90.0f; // Field of view in degrees
-        float aspectRatio = 16.0f / 9.0f; // Aspect ratio of the viewport
         float nearClip = 0.1f; // Near clipping plane
         float farClip = 100.0f; // Far clipping plane
 
@@ -186,7 +208,7 @@ protected:
         _perspectiveMatrix = glm::perspective(glm::radians(fov), aspectRatio, nearClip, farClip);
         
         // Camera parameters
-        glm::vec3 cameraPosition = glm::vec3(2.0, 0.0, 2.0f);  // New camera position
+        glm::vec3 cameraPosition = glm::vec3(2.0, 0.0, 0.0f);  // New camera position
         glm::vec3 cameraTarget = glm::vec3(0.0f, 0.0f, 0.0f);    // Camera target (where the camera is looking)
         glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);         // Up vector
 
@@ -202,7 +224,7 @@ protected:
         
         dbgCheckGLError();
     }
-    
+
     bool prepareNextFrame() override
     {
         _angleX += _dAngleAct;
@@ -237,29 +259,208 @@ protected:
 
 public:
     ViewGLLighting()
-
-    {
-       
+    : paramNames(1)
+    , paramIndices(1)
+    , paramValues(1)
+    { 
         gui::gl::Context reqContext(gui::gl::Context::Animation::Yes, gui::gl::DepthBuffer::Size::B2);
         createContext(reqContext, {gui::InputDevice::Event::Keyboard, gui::InputDevice::Event::PrimaryClicks, gui::InputDevice::Event::SecondaryClicks });
+        s_sdkPath = mu::getHomePath() / "natID.SDK";
     }
     
     ~ViewGLLighting()
     {
         makeCurrentContext();
     }
+
+    void start() {
+
+#if defined(MU_WINDOWS)
+        const char* InFile = "C:/Users/DiV/natID.Examples/Turbina/modeli/turbina_vdc_w.dmodl";
+        const char* OutFile = "C:/Users/DiV/natID.Examples/Turbina/temp/rez.txt";
+#elif defined(MU_MACOS)
+        const char* Folder = "/Volumes/RAMDisk/Res"; // NOTE: adjust output folder!!
+#else
+        // Linux
+        const char* Folder = "/media/RAMDisk/Res"; // NOTE: adjust output folder!!
+#endif
+
+        testRealDynamic(sc::IDynamic::Problem::DAE, InFile, OutFile, 20.0, td::String("β_ref"));
+    }
+
+    void stop() {
+        _dAngle=0.0;
+        _dAngleAct = _dAngle;
+    }
     
     void updateSpeed(float val)
     {
         _dAngle = val;
-        _dAngleAct = rotation ? _dAngle : 0.f;
+        _dAngleAct = _dAngle;// rotation ? _dAngle : 0.f;
     }
     
 
     void switchRotation()
     {
         rotation = !rotation;
-        _dAngleAct = rotation ? _dAngle : 0.f;
+        _dAngleAct = _dAngle;// rotation ? _dAngle : 0.f;
+    }
+
+
+
+    fo::fs::path s_sdkPath;
+
+    enum class Location { Real = 0, Complex, Selected };
+
+    template <class TNAMES, class TVALS>
+
+    inline void showResults(std::ofstream& fOut, const char* lbl, const TNAMES& outNames, const TVALS& vals)
+    {
+        fOut << td::endl;
+        fOut << lbl << td::endl;
+        fOut << "--------------------" << td::endl;
+        fOut << "Name      value" << td::endl;
+        fOut << "--------------------" << td::endl;
+        auto nVals = outNames.size();
+        for (decltype(nVals) i = 0; i < nVals; ++i)
+            fOut << outNames[i] << ": " << vals[i] << td::endl;
+        fOut << "--------------------" << td::endl;
+    }
+
+
+    inline void showResHeader(std::ofstream& fOut, sc::IRealDynamicModel::NameVector& outNames, const char* lbl = nullptr)
+    {
+        if (lbl)
+            fOut << lbl << td::endl;
+
+        fOut << "t";
+        for (const auto& name : outNames)
+            fOut << " " << name;
+        fOut << td::endl;
+    }
+
+    inline void showResRow(std::ofstream& fOut, double t, sc::IRealDynamicModel::ValueVector& values)
+    {
+        fOut << t;
+        for (const auto& val : values)
+            fOut << " " << val;
+        fOut << td::endl;
+    }
+
+    
+    
+    inline void testRealDynamic(sc::IDynamic::Problem problem, const char* inFile, const char* outFile, double tFinal, const td::String& paramName = td::String())
+    {
+        sc::ILog* pLog = sc::getConsoleLogger();
+        pModel = sc::createRealDynamicModel(problem, pLog);
+        assert(pModel);
+        //mem::PointerReleaser releaser(pModel);
+        td::String inFileName = inFile;
+        td::String outFileName = outFile;
+        if (inFileName.length() == 0 || outFileName.length() == 0)
+        {
+            return;
+        }
+
+        if (!pModel->initFromFile(inFileName))
+        {
+            return;
+        }
+
+        pDynSolver = pModel->getSolverInterface();
+        if (!pDynSolver)
+        {
+            return;
+        }
+
+        //res file
+        if (!fo::createTextFile(fOut, outFileName))
+        {
+            return;
+        }
+
+        //check params
+        if (paramName.length() != 0)
+        {
+            std::string pom = paramName.c_str();
+            paramIndex = pModel->getParameterIndex(paramName);
+            if (paramIndex < 0)
+            {
+                return;
+            }
+
+            paramNames[0] = paramName;
+            paramIndices[0] = (unsigned int)paramIndex;
+
+            //get parameter values
+            pModel->getParameterValues(paramIndices, paramValues);
+        }
+
+        //check deltaT
+        dT = 0;
+        {
+            dT = pDynSolver->getStepSize();
+            if (dT <= 0)
+            {
+                dT = 0.001;
+                pDynSolver->setStepSize(dT);
+            }
+        }
+        //initial reset
+        if (!pDynSolver->reset(0))
+        {
+            return;
+        }
+
+        outIndices = pModel->getOutputSymbolIndices();
+        if (outIndices.size() == 0)
+        {
+            return;
+        }
+
+        outNames = pModel->getOutputSymbolNames(outIndices);
+        if (outNames.size() == 0)
+        {
+            return;
+        }
+
+        if (!pModel->getOutputSymbolValues(outIndices, outValues))
+        {
+            return;
+        }
+
+        showResHeader(fOut, outNames);
+
+        showResRow(fOut, 0, outValues);
+
+        //    if (paramIndex < 0)
+        //    {
+        //        std::cout << "INFO: testRealDynamic completed successfully (without param manipulaitons)" << td::endl;
+        //        return;
+        //    }
+        t = 0;
+        epsT = 1e-6;
+
+    }
+
+    void runStep() {
+        t += dT;
+        if (paramIndex >= 0)
+        {
+            pModel->getNumberOfParameters();
+            paramValues[0] = 0;
+            pModel->setParameterValues(paramIndices, paramValues);
+        }
+
+        auto sol = pDynSolver->step();
+        if (sol != sc::Solution::OK)
+        {
+            std::cout << "ERROR! Cannot solve the problem!" << td::endl;
+            return;
+        }
+        pModel->getOutputSymbolValues(outIndices, outValues);
+        updateSpeed(outValues[0]/100);
+        showResRow(fOut, t, outValues);
     }
 
 };

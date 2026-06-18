@@ -7,6 +7,7 @@
 #include "MenuBar.h"
 #include "ToolBar.h"
 #include "ViewGLLighting.h"
+#include "MainView.h"
 
 class MainWindow : public gui::Window
 {
@@ -14,7 +15,7 @@ private:
 protected:
     MenuBar _mainMenuBar;
     ToolBar _toolBar;
-    ViewGLLighting _viewCubeMap;
+    MainView _mv;
 public:
     MainWindow()
     : gui::Window(gui::Geometry(50, 50, 1200, 600))
@@ -24,7 +25,7 @@ public:
 //        _toolBar.setIconSize(gui::ToolBar::IconSize::SystemDefault);
 //    
         setToolBar(_toolBar);
-        setCentralView(&_viewCubeMap);
+        setCentralView(&_mv);
     }
     
 protected:
@@ -47,7 +48,7 @@ protected:
         if (pSlider == _toolBar.getSpeedSlider())
         {
             double val = pSlider->getValue();
-            _viewCubeMap.updateSpeed((float)val);
+            //_viewCubeMap.updateSpeed((float)val);
             return true;
         }
         return false;
@@ -58,7 +59,7 @@ protected:
 
         if (pBtn == _toolBar.getRotateSwitch())
         {
-            _viewCubeMap.switchRotation();
+            _mv.startStop();
             return true;
         }
         return false;

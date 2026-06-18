@@ -65,10 +65,10 @@ Params:
 	β_ref=0
 
 PreProc:
-	if t<40:
+	if t<5:
 		v_w=12
 	end
-	if t>40:
+	if t>5:
 		v_w=10
 	end
 	if t>80:

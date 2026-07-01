@@ -8,6 +8,7 @@ import math
 import time
 from dTwin import modelSolver
 import plotTable
+import matplotlib.pyplot as plt
 
 def g(lambd, beta):
     return 1/(lambd-0.02*beta)-0.003/(beta**3+1)
@@ -83,3 +84,65 @@ for i in range(6):
         matrice[i, j]=mats(1.7+0.1*i, j*2, 11)
 
 print(mats(1.9195, 2.7, 11))
+
+
+
+# -------------------------------------------------------
+# Operating point
+# -------------------------------------------------------
+omega0 = 1.9195
+vw0 = 11
+Rt = 40
+
+lambda0 = Rt * omega0 / vw0
+beta0 = 5   # linearization point (same for both plots)
+
+Cp_lin = Cp_approx(lambda0, beta0)
+
+# =======================================================
+# PLOT 1: Cp vs lambda (beta fixed = 5)
+# =======================================================
+beta_fixed = 5
+
+lambdas = np.linspace(2, 12, 400)
+
+Cp_true_1 = Cp(lambdas, beta_fixed)
+Cp_lin_1 = Cp_lin(lambdas, beta_fixed)
+
+# =======================================================
+# PLOT 2: Cp vs beta (lambda fixed = lambda0)
+# =======================================================
+betas = np.linspace(0, 10, 400)
+
+Cp_true_2 = Cp(lambda0, betas)
+Cp_lin_2 = Cp_lin(lambda0, betas)
+
+# -------------------------------------------------------
+# plotting
+# -------------------------------------------------------
+plt.figure(figsize=(12,5))
+
+# ---- subplot 1 ----
+plt.subplot(1,2,1)
+plt.plot(lambdas, Cp_true_1, label=r"$C_p(\lambda, \beta=5)$")
+plt.plot(lambdas, Cp_lin_1, "--", label="Linearized")
+plt.scatter(lambda0, Cp(lambda0, beta_fixed), color="red")
+plt.xlabel(r"$\lambda$")
+plt.ylabel(r"$C_p$")
+plt.title(r"$C_p$ vs $\lambda$ (fixed $\beta=5$)")
+plt.grid()
+plt.legend()
+
+# ---- subplot 2 ----
+plt.subplot(1,2,2)
+plt.plot(betas, Cp_true_2, label=r"$C_p(\lambda_0, \beta)$")
+plt.plot(betas, Cp_lin_2, "--", label="Linearized")
+plt.scatter(beta0, Cp(lambda0, beta0), color="red")
+plt.xlabel(r"$\beta$")
+plt.ylabel(r"$C_p$")
+plt.title(r"$C_p$ vs $\beta$ (fixed $\lambda_0$)")
+plt.grid()
+plt.legend()
+
+plt.tight_layout()
+plt.show()

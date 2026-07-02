@@ -87,7 +87,7 @@ def runDynamicModel():
         out_values=p_model.getOutputSymbolValues(out_indices)
         t=0.0
         eps_t=1e-6
-        t_final=200
+        t_final=80
         w_rated=1.9195
         Kp=-400.2
         Ki=-100.1

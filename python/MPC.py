@@ -80,15 +80,12 @@ def mpc_pitch(x0, vw, Tg):
 
     rows = []
     rhs = []
-
-    # initial state
     A0 = np.zeros((nx, nvars))
     A0[:, :nx] = np.eye(nx)
 
     rows.append(A0)
     rhs.append(x0)
 
-    # predicted disturbances
     d = np.array([vw, Tg])
 
     for k in range(N):
@@ -110,10 +107,6 @@ def mpc_pitch(x0, vw, Tg):
 
     Aeq = np.vstack(rows)
     beq = np.concatenate(rhs)
-
-    # ==========================
-    # pitch constraints
-    # ==========================
 
     Aineq = np.zeros((N, nvars))
 
@@ -144,7 +137,6 @@ def mpc_pitch(x0, vw, Tg):
     ])
 
     prob = osqp.OSQP()
-
     prob.setup(
         P=H,
         q=q,
@@ -155,11 +147,8 @@ def mpc_pitch(x0, vw, Tg):
     )
 
     result = prob.solve()
-
     z = result.x
-
     U = z[(N+1)*nx:]
-
     beta_ref = U[0]
 
     return beta_ref
@@ -203,7 +192,7 @@ def startDynamicModel():
     if not p_model:
         print("ERROR! Cannot create model")
         return False
-    if not p_model.initFromFile("../modeli/turbina_vdc_w.dmodl"):
+    if not p_model.initFromFile("turbina_vdc_w.dmodl"):
         print("ERROR! Cannot init from file!")
         return False
     
@@ -247,7 +236,7 @@ def runDynamicModel():
         out_values=p_model.getOutputSymbolValues(out_indices)
         t=0.0
         eps_t=1e-6
-        t_final=200
+        t_final=80
         w_rated=1.9195
         x = np.array([
             1.5, 
@@ -258,6 +247,7 @@ def runDynamicModel():
             w_g=getValue(out_names, out_values, "ω_g")
             Tg=getValue(out_names, out_values, "m_m_ref")
             vw=getValue(out_names, out_values, "v_w")
+            #print(t, vw)
             if w_g>w_rated:
                 param_values[0] = mpc_pitch(
                     x0=x,
@@ -282,4 +272,4 @@ def runDynamicModel():
 
 startDynamicModel()
 runDynamicModel()
-fig1, ax1 = plotTable.plot_res("res.txt", ["ω_g", "β"])
+fig1, ax1 = plotTable.plot_res("res.txt", ["ω_g", "β", "v_w"])

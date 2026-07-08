@@ -43,7 +43,7 @@ def startDynamicModel():
     if not p_model:
         print("ERROR! Cannot create model")
         return False
-    if not p_model.initFromFile("../modeli/turbina_vdc_w.dmodl"):
+    if not p_model.initFromFile("turbina_vdc_w.dmodl"):
         print("ERROR! Cannot init from file!")
         return False
     
@@ -94,9 +94,11 @@ def runDynamicModel():
         integrator=0
         while t<t_final:
             w_g=getValue(out_names, out_values, "ω_g")
-            e=min(w_rated-w_g, 0)
+            e=w_rated-w_g
             integrator=integrator+e*d_t
-
+            if e>0:
+                integrator=0
+                e=0
             param_values[0] = Kp*e+Ki*integrator
             param_values[0]=max(min(param_values[0], 90), 0)
 

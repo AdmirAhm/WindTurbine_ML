@@ -2,13 +2,16 @@ import numpy as np
 import dTwin
 from dTwin import modelSolver
 import plotTable
+import os
 
 from wind_turbine_env import WindTurbineEnv, getValue, OMEGA_REF
 from ddqn_agent import DDQNAgent
 
 
-MODEL_PATH = "../../modeli/turbina_vdc_w.dmodl"
-AGENT_PATH = "ddqn_pitch_model.keras"
+MODEL_PATH = "turbina_vdc_w.dmodl"
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+AGENT_PATH = os.path.join(BASE_DIR, "ddqn_pitch_model.keras")
 
 
 def load_trained_agent(state_dim, n_actions, path=AGENT_PATH):
@@ -47,7 +50,7 @@ def test_steady(vw, n_steps=150, seed=0):
     return log
 
 
-def test_long_run(t_final=200.0, out_file="res_ddqn.txt"):
+def test_long_run(t_final=80.0, out_file="res_ddqn.txt"):
     p_log = dTwin.getConsoleLogger()
     p_model = dTwin.createRealDynamicModel(dTwin.DynamicProblem.DAE, p_log)
     if not p_model:
@@ -147,6 +150,6 @@ def test_long_run(t_final=200.0, out_file="res_ddqn.txt"):
 
 
 if __name__ == "__main__":
-    out_file = test_long_run(t_final=200.0, out_file="res_ddqn.txt")
+    out_file = test_long_run(t_final=80.0, out_file="res_ddqn.txt")
     if out_file:
         fig, ax = plotTable.plot_res(out_file, ["ω_g", "β"])

@@ -1,0 +1,333 @@
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from scipy.optimize import minimize
+from collections import deque
+import time
+import dTwin
+from dTwin import modelSolver
+import plotTable
+
+# ==========================================
+# NMPC CONFIGURATION
+# ==========================================
+N = 10
+WINDOW = 200
+
+keras.config.enable_unsafe_deserialization()
+
+MODEL_PATH = "keras_models/wind_turbine_lstm_multistep10_best.keras"
+SCALER_PATH = "keras_models/scalers_multistep10.npz"
+
+model = keras.models.load_model(MODEL_PATH, compile=False)
+
+_scalers = np.load(SCALER_PATH)
+x_mean = tf.constant(_scalers["x_mean"], dtype=tf.float32)   # [v_w, beta_ref] means, shape (2,)
+x_std = tf.constant(_scalers["x_std"], dtype=tf.float32)
+y_mean = tf.constant(_scalers["y_mean"], dtype=tf.float32)   # [beta, omega_g] means, shape (2,)
+y_std = tf.constant(_scalers["y_std"], dtype=tf.float32)
+
+_hist_shape, _future_shape = model.input_shape
+assert _hist_shape[1] == WINDOW, f"Model history window {_hist_shape[1]} != WINDOW={WINDOW}"
+assert _future_shape[1] == N, f"Model horizon {_future_shape[1]} != N={N}"
+assert model.output_shape[1] == N, f"Model output horizon {model.output_shape[1]} != N={N}"
+
+# --- Cost weights (normalized/dimensionless terms) ---------------------
+omega_ref = 1.9195
+OMEGA_SCALE = 0.1
+BETA_SCALE = 90.0
+
+Q_OMEGA = 1000.0
+Q_TERMINAL = 500.0 * Q_OMEGA        # extra weight on the LAST predicted step, to fight overshoot
+Q_OVERSHOOT = 500.0 * Q_OMEGA        # ADDITIVE penalty, only active when omega_g > omega_ref, every step
+Q_TERMINAL_OVERSHOOT = 100.0 * Q_TERMINAL  # same, but specifically on the last predicted step
+Q_BETA = 1.0
+R_U = 0.1
+OOB_PENALTY_WEIGHT = 3000.0   # soft out-of-bounds penalty, replaces hard bounds constraint
+
+BETA_MIN, BETA_MAX = 0.0, 90.0
+MAX_PITCH_RATE = 8.0          # deg/s -- adjust to your actual actuator spec
+
+# ==========================================
+# SOLUTION 1: Delta-reparameterized rollout + cost
+# ==========================================
+# Decision variable is now delta[k] = u[k] - u[k-1] (pitch-RATE increments),
+# not the absolute beta_ref sequence. This turns the rate-limit constraint
+# into a plain box bound [-max_delta, max_delta] on delta -- no nonlinear
+# constraint functions/Jacobians needed, which lets us drop SLSQP's QP
+# subproblem machinery in favor of L-BFGS-B.
+
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[N], dtype=tf.float32),    # delta: candidate pitch-rate increments
+    tf.TensorSpec(shape=[], dtype=tf.float32),     # beta_ref_prev
+    tf.TensorSpec(shape=[WINDOW], dtype=tf.float32),
+    tf.TensorSpec(shape=[WINDOW], dtype=tf.float32),
+])
+def _cost_and_grad_delta(delta, beta_ref_prev, H_vw, H_br):
+    with tf.GradientTape() as tape:
+        tape.watch(delta)
+
+        u = beta_ref_prev + tf.cumsum(delta)   # reconstruct absolute beta_ref sequence
+
+        hist = tf.stack([H_vw, H_br], axis=-1)[tf.newaxis, ...]         # (1, WINDOW, 2)
+        hist_scaled = (hist - x_mean) / x_std
+
+        u_scaled = ((u - x_mean[1]) / x_std[1])[tf.newaxis, :, tf.newaxis]  # (1, N, 1)
+
+        preds = model([hist_scaled, u_scaled], training=False)[0] * y_std + y_mean  # (N, 2)
+        beta_pred = preds[:, 0]
+        omega_pred = preds[:, 1]
+
+        # Base symmetric tracking cost, every horizon step -- unchanged,
+        # simple and always safe.
+        error = omega_pred - omega_ref
+        omega_term = tf.square(error / OMEGA_SCALE)
+
+        # ADDITIVE overshoot penalty: relu(error) is 0 whenever omega_g <=
+        # omega_ref, and grows smoothly (with a well-defined subgradient
+        # at 0) whenever omega_g > omega_ref. No branching, no tf.where,
+        # no tf.cond -- just a hinge function -- so this can never produce
+        # a disconnected/None gradient regardless of runtime values.
+        overshoot_term = tf.square(tf.nn.relu(error) / OMEGA_SCALE)
+
+        # Terminal versions of the same two terms, on the LAST predicted
+        # step only, so the optimizer specifically cares about where the
+        # trajectory ends up rather than just the horizon-wide average.
+        terminal_error = omega_pred[-1] - omega_ref
+        terminal_term = tf.square(terminal_error / OMEGA_SCALE)
+        terminal_overshoot_term = tf.square(tf.nn.relu(terminal_error) / OMEGA_SCALE)
+
+        beta_term = tf.square(beta_pred / BETA_SCALE)
+        u_term = tf.square(u / BETA_SCALE)
+
+        # soft penalty keeps u inside [BETA_MIN, BETA_MAX]; cheap vs a hard
+        # constraint and in practice u rarely approaches the actuator limits
+        oob_penalty = OOB_PENALTY_WEIGHT * (
+            tf.reduce_sum(tf.square(tf.nn.relu(u - BETA_MAX)))
+            + tf.reduce_sum(tf.square(tf.nn.relu(BETA_MIN - u)))
+        )
+
+        cost = (
+            tf.reduce_sum(Q_OMEGA * omega_term)
+            + tf.reduce_sum(Q_OVERSHOOT * overshoot_term)
+            + Q_TERMINAL * terminal_term
+            + Q_TERMINAL_OVERSHOOT * terminal_overshoot_term
+            + tf.reduce_sum(Q_BETA * beta_term)
+            + tf.reduce_sum(R_U * u_term)
+            + oob_penalty
+        )
+    grad = tape.gradient(cost, delta)
+    return cost, grad
+
+
+# ==========================================
+# SOLUTION 2 + 3: tuned maxiter / ftol, with running convergence stats
+# ==========================================
+# maxiter is intentionally modest -- L-BFGS-B on a smooth, unconstrained-
+# by-nonlinear-terms problem should converge in well under this many
+# iterations most of the time. _nit_history lets you check that
+# assumption empirically (see print at the bottom of runDynamicModel)
+# and re-tighten further if the numbers support it.
+_SOLVE_MAXITER = 20
+_SOLVE_FTOL = 1e-2          # loosened vs the old 1e-6, now that costs are O(1)-O(10), not O(1e3)-O(1e5)
+_nit_history = []
+_solve_time_history = []
+_conversion_time_history = []
+
+_delta_warm_start = np.zeros(N, dtype=np.float64)
+
+
+def nmpc_pitch(H_vw, H_br, beta_ref_prev, dt):
+    """
+    H_vw, H_br    : deque/array of the last WINDOW values (oldest -> newest)
+    beta_ref_prev : last applied beta_ref, H_br[-1]
+    dt            : simulation step size
+    Returns the first move of the optimized beta_ref sequence.
+    """
+    global _delta_warm_start
+
+    # --- SOLUTION 4: profiling -----------------------------------------
+    t0 = time.perf_counter()
+    H_vw_t = tf.constant(np.asarray(H_vw, dtype=np.float32))
+    H_br_t = tf.constant(np.asarray(H_br, dtype=np.float32))
+    prev_t = tf.constant(float(beta_ref_prev), dtype=tf.float32)
+    t1 = time.perf_counter()
+
+    def scipy_cost(d_np):
+        d = tf.constant(d_np, dtype=tf.float32)
+        cost, grad = _cost_and_grad_delta(d, prev_t, H_vw_t, H_br_t)
+        return float(cost.numpy()), grad.numpy().astype(np.float64)
+
+    max_delta = MAX_PITCH_RATE * dt
+
+    result = minimize(
+        scipy_cost,
+        x0=_delta_warm_start,
+        jac=True,
+        method="L-BFGS-B",
+        bounds=[(-max_delta, max_delta)] * N,
+        options={"maxiter": _SOLVE_MAXITER, "ftol": _SOLVE_FTOL},
+    )
+    t2 = time.perf_counter()
+
+    _conversion_time_history.append(t1 - t0)
+    _solve_time_history.append(t2 - t1)
+    _nit_history.append(result.nit)
+
+    if not result.success and result.status not in (0,):
+        # L-BFGS-B's failure modes are usually benign (hit maxiter while
+        # still improving) -- log but don't treat as fatal the way a
+        # genuine SLSQP non-convergence would be.
+        print(f"NMPC step: L-BFGS-B did not fully converge - status={result.status}, "
+              f"nit={result.nit}, message={result.message}")
+
+    delta_opt = result.x
+    u_opt = np.clip(beta_ref_prev + np.cumsum(delta_opt), BETA_MIN, BETA_MAX)
+
+    _delta_warm_start = np.concatenate([delta_opt[1:], delta_opt[-1:]])
+
+    return float(u_opt[0])
+
+
+def print_solver_profile():
+    if not _nit_history:
+        return
+    nit = np.array(_nit_history)
+    solve_t = np.array(_solve_time_history)
+    conv_t = np.array(_conversion_time_history)
+    print("\n=== NMPC solver profile ===")
+    print(f"  steps run:        {len(nit)}")
+    print(f"  nit    mean/median/max: {nit.mean():.1f} / {np.median(nit):.0f} / {nit.max()}")
+    print(f"  solve time (s)  mean/median/max: {solve_t.mean():.4f} / {np.median(solve_t):.4f} / {solve_t.max():.4f}")
+    print(f"  conversion time (s) mean/median/max: {conv_t.mean():.5f} / {np.median(conv_t):.5f} / {conv_t.max():.5f}")
+    print(f"  conversion as % of solve: {100*conv_t.sum()/solve_t.sum():.1f}%")
+    # Use this to re-tighten _SOLVE_MAXITER: if nit's max is well below
+    # _SOLVE_MAXITER, you have unused headroom you can cut.
+
+
+# ==========================================
+# SIMULATION  (same dTwin integration as before)
+# ==========================================
+
+p_model = None
+out_indices = None
+out_names = None
+p_dyn_solver = None
+p_log = None
+
+
+def getValue(out_names, values, var):
+    for i in range(len(out_names)):
+        if str(out_names[i]) == var:
+            return values[i]
+    return 0
+
+
+def show_res_row(f_out, t: float, values: dTwin.DoubleVector):
+    f_out.write(f"{t}")
+    for val in values:
+        f_out.write(f" {val}")
+    f_out.write("\n")
+
+
+def show_res_header(f_out, out_names: dTwin.StringVector, lbl: str = None):
+    if lbl:
+        f_out.write(lbl + "\n")
+    f_out.write("t")
+    for name in out_names:
+        f_out.write(f" {name}")
+    f_out.write("\n")
+
+
+def startDynamicModel():
+    global p_model
+    global p_dyn_solver
+    p_log = dTwin.getConsoleLogger()
+    p_model = dTwin.createRealDynamicModel(dTwin.DynamicProblem.DAE, p_log)
+    if not p_model:
+        print("ERROR! Cannot create model")
+        return False
+    if not p_model.initFromFile("turbina_vdc_w.dmodl"):
+        print("ERROR! Cannot init from file!")
+        return False
+
+    p_dyn_solver = p_model.getSolverInterface()
+    if not p_dyn_solver:
+        print("ERROR! Cannot obtain solver interface!")
+        return False
+    return True
+
+
+def runDynamicModel():
+    global p_model
+    global p_dyn_solver
+    global p_log
+
+    with open("res_nmpc.txt", 'w', encoding='utf-8') as f_out:
+        param_index = -1
+        param_names = dTwin.StringVector(1)
+        param_indices = dTwin.UintVector(1)
+        param_values = dTwin.DoubleVector(1)
+        param_index = p_model.getParameterIndex("β_ref")
+
+        param_names[0] = "β_ref"
+        param_indices[0] = param_index
+
+        if not p_dyn_solver.reset(0):
+            print("ERROR! Cannot reset the problem")
+            return None
+
+        out_indices = p_model.getOutputSymbolIndices()
+        if len(out_indices) == 0:
+            print("ERROR! Cannot obtain output indices!")
+            return None
+
+        out_names = p_model.getOutputSymbolNames(out_indices)
+        if len(out_names) == 0:
+            print("ERROR! Cannot obtain output names!")
+            return None
+
+        show_res_header(f_out, out_names)
+        d_t = p_dyn_solver.getStepSize()
+        out_values = p_model.getOutputSymbolValues(out_indices)
+        t = 0.0
+        t_final = 80
+        w_rated = 1.9195
+
+        vw0 = getValue(out_names, out_values, "v_w")
+        H_vw = deque([vw0] * WINDOW, maxlen=WINDOW)
+        H_br = deque([0.0] * WINDOW, maxlen=WINDOW)
+
+        while t < t_final:
+            print(t)
+            w_g = getValue(out_names, out_values, "ω_g")
+            vw = getValue(out_names, out_values, "v_w")
+
+            if w_g > w_rated:
+                beta_ref_prev = H_br[-1]
+                param_values[0] = nmpc_pitch(
+                    H_vw=H_vw, H_br=H_br, beta_ref_prev=beta_ref_prev, dt=d_t
+                )
+            else:
+                param_values[0] = 0.0
+
+            H_vw.append(vw)
+            H_br.append(param_values[0])
+
+            p_model.setParameterValues(param_indices, param_values)
+
+            sol = p_dyn_solver.step()
+            if sol != dTwin.Solution.OK:
+                print("ERROR! Cannot solve the problem!")
+                return None
+            out_values = p_model.getOutputSymbolValues(out_indices)
+            show_res_row(f_out, t, out_values)
+            t += d_t
+
+        print("INFO! NMPC dynamic test completed succesfully!")
+        print_solver_profile()
+
+
+startDynamicModel()
+runDynamicModel()
+fig1, ax1 = plotTable.plot_res("res_nmpc.txt", ["ω_g", "β"])

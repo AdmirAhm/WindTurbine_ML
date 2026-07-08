@@ -377,8 +377,8 @@ public:
     void start() {
 
 #if defined(MU_WINDOWS)
-        const char* InFile = "C:/Users/DiV/natID.Examples/Turbina/modeli/turbina_vdc_w.dmodl";
-        const char* OutFile = "C:/Users/DiV/natID.Examples/Turbina/temp/rez.txt";
+        const char* InFile = "C:/Users/ahmes/natID.Examples/Turbina/modeli/turbina_vdc_w.dmodl";
+        const char* OutFile = "C:/Users/ahmes/natID.Examples/Turbina/temp/rez.txt";
 #elif defined(MU_MACOS)
         const char* Folder = "/Volumes/RAMDisk/Res"; // NOTE: adjust output folder!!
 #else

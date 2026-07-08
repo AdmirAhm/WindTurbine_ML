@@ -13,7 +13,7 @@ import plotTable
 # ==========================================
 # Horizon length matches MPC.py's linear MPC (N=5) so the two controllers
 # are directly comparable in the thesis benchmark.
-N = 5
+N = 60
 
 # --- LSTM surrogate model ---------------------------------------------
 # The saved .keras model uses a Lambda layer (unsafe to deserialize by
@@ -41,11 +41,11 @@ assert WINDOW is not None, "Model input window must be static for NMPC rollout."
 
 # --- Cost weights (mirrors MPC.py's Q / R so results are comparable) ---
 omega_ref = 1.9195
-Q_OMEGA = 30000.0   # penalty on (omega_g_pred - omega_ref)^2, per horizon step
-Q_BETA = 0.1        # small penalty on beta_pred^2 (mirrors P/Q beta weight)
-R_U = 0.1           # penalty on beta_ref^2 (control effort)
+Q_OMEGA = 1000.0   # penalty on (omega_g_pred - omega_ref)^2, per horizon step
+Q_BETA = 1        # small penalty on beta_pred^2 (mirrors P/Q beta weight)
+R_U = 50           # penalty on beta_ref^2 (control effort)
 
-BETA_MIN, BETA_MAX = 0.0, 90.0
+BETA_MIN, BETA_MAX = 0.0, 15.0
 
 # ==========================================
 # DIFFERENTIABLE BATCHED ROLLOUT
@@ -86,6 +86,9 @@ def _rollout(u, vw_now, H_vw, H_br):
     omega_pred = preds[:, 1]
     return beta_pred, omega_pred
 
+# --- Normalization constants (typical operating ranges) ---
+OMEGA_SCALE = 0.1          # rad/s - typical meaningful deviation from omega_ref
+BETA_SCALE = BETA_MAX       # 90 deg - full actuator range
 
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[N], dtype=tf.float32),
@@ -97,14 +100,18 @@ def _cost_and_grad(u, vw_now, H_vw, H_br):
     with tf.GradientTape() as tape:
         tape.watch(u)
         beta_pred, omega_pred = _rollout(u, vw_now, H_vw, H_br)
+
+        omega_term = tf.square((omega_pred - omega_ref) / OMEGA_SCALE)
+        beta_term  = tf.square(beta_pred / BETA_SCALE)
+        u_term     = tf.square(u / BETA_SCALE)
+
         cost = (
-            tf.reduce_sum(Q_OMEGA * tf.square(omega_pred - omega_ref))
-            + tf.reduce_sum(Q_BETA * tf.square(beta_pred))
-            + tf.reduce_sum(R_U * tf.square(u))
+            tf.reduce_sum(Q_OMEGA * omega_term)
+            + tf.reduce_sum(Q_BETA * beta_term)
+            + tf.reduce_sum(R_U * u_term)
         )
     grad = tape.gradient(cost, u)
     return cost, grad
-
 
 # ==========================================
 # NMPC FUNCTION
@@ -136,8 +143,11 @@ def nmpc_pitch(vw_now, H_vw, H_br):
         jac=True,
         method="SLSQP",
         bounds=[(BETA_MIN, BETA_MAX)] * N,
-        options={"maxiter": 30, "ftol": 1e-1},
+        options={"maxiter": 40, "ftol": 1e-3},
     )
+    #result = minimize(cost_fn, x0, method='SLSQP', ...)
+    if not result.success or result.nit >= 40 - 1:
+        print(f"Step x: SLSQP did NOT converge cleanly - status={result.status}, nit={result.nit}, message={result.message}")
 
     u_opt = np.clip(result.x, BETA_MIN, BETA_MAX)
 

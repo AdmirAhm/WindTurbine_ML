@@ -207,7 +207,7 @@ def runDynamicModel():
     global p_dyn_solver
     global p_log
 
-    with open("res.txt", 'w', encoding='utf-8') as f_out:
+    with open("res_lin.txt", 'w', encoding='utf-8') as f_out:
         param_index = -1
         param_names = dTwin.StringVector(1)
         param_indices = dTwin.UintVector(1)
@@ -272,4 +272,4 @@ def runDynamicModel():
 
 startDynamicModel()
 runDynamicModel()
-fig1, ax1 = plotTable.plot_res("res.txt", ["ω_g", "β", "v_w"])
+fig1, ax1 = plotTable.plot_res("res_lin.txt", ["ω_g", "β"])
